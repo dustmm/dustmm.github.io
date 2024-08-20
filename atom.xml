@@ -1,0 +1,1725 @@
+<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+    <id>https://dustmm.github.io</id>
+    <title>Dustin Blog</title>
+    <updated>2024-08-20T03:41:00.633Z</updated>
+    <generator>https://github.com/jpmonette/feed</generator>
+    <link rel="alternate" href="https://dustmm.github.io"/>
+    <link rel="self" href="https://dustmm.github.io/atom.xml"/>
+    <subtitle>求以欢喜之心，领岁月之教诲</subtitle>
+    <logo>https://dustmm.github.io/images/avatar.png</logo>
+    <icon>https://dustmm.github.io/favicon.ico</icon>
+    <rights>All rights reserved 2024, Dustin Blog</rights>
+    <entry>
+        <title type="html"><![CDATA[设备硬件功能测试]]></title>
+        <id>https://dustmm.github.io/post/hardware/</id>
+        <link href="https://dustmm.github.io/post/hardware/">
+        </link>
+        <updated>2024-08-01T09:27:02.000Z</updated>
+        <content type="html"><![CDATA[<p>👏 欢迎使用<strong>OpenWrt</strong>，本文主要记录基于 OpenWrt 环境下实现的一些设备硬件功能上的简单的测试方案！</p>
+<h2 id="led-测试">👇 LED 测试</h2>
+<ul>
+<li>LED 的接口在 /sys/class/leds/ 下面，以 WiFi 的 LED 为例。</li>
+</ul>
+<pre><code class="language-bash">echo 1 &gt; /sys/class/leds/wifi/brightness        # 点亮
+echo 0 &gt; /sys/class/leds/wifi/brightness        # 熄灭
+</code></pre>
+<h2 id="rtc-测试">👇 RTC 测试</h2>
+<ul>
+<li>使用 date、hwclock 指令，进行 RTC 时间设置，并读取对比。</li>
+</ul>
+<pre><code class="language-bash">date -s &quot;2020-06-18 15:25:00&quot;       # 设置系统时间
+hwclock -w                                       # 同步系统时间到RTC中
+date                                                  # 查看系统时间
+hwclock                                            # 查看RTC时间
+</code></pre>
+<h2 id="reset-按键测试">👇 Reset 按键测试</h2>
+<ul>
+<li>输入命令后，按键时有内容输出，则验证通过。</li>
+</ul>
+<pre><code class="language-bash">cat /dev/input/event0 | hexdump
+</code></pre>
+<h2 id="存储设备测试">👇 存储设备测试</h2>
+<ul>
+<li>使用 cp、diff 指令，进行文件读写测试。</li>
+</ul>
+<pre><code class="language-bash">mount /dev/sda1 /mnt    # 挂载U盘
+cp test /mnt                      # 拷贝test文件到U盘挂载的目录
+diff test /mnt/test            # 比对两个文件的区别
+</code></pre>
+<h2 id="网卡网口测试">👇 网卡网口测试</h2>
+<ul>
+<li>配置网桥 ping 包方式。</li>
+</ul>
+<pre><code class="language-bash">for intf in $(ls /sys/class/net/ | grep eth); do ifconfig $intf up; done                            # 使能上联口
+brctl addbr br-lan                                                                                                               # 创建网桥
+for intf in $(ls /sys/class/net/ | grep -P 'lan|wan'); do brctl addif br-lan $intf; done    # 往桥内添加网口节点
+for intf in $(ls /sys/class/net/ | grep -P 'lan|wan'); do ifconfig $intf up; done              # 把对应网口节点启用
+ifconfig br-lan 192.168.100.1                                                                                            # 给桥配置IP地址
+ping 192.168.100.212                                                                                                        # 往对端（PC端）ping包（PC的IP地址）
+</code></pre>
+<h2 id="4g5g-模块测试">👇 4G/5G 模块测试</h2>
+<ul>
+<li>修改内核代码，更改 4G/5G 网口名字。</li>
+</ul>
+<pre><code class="language-bash">vi drivers/net/usb/usbnet.c
+######文件修改内容如下######
+strcpy (net-&gt;name, &quot;usb%d&quot;);
+######文件修改内容结束######
+</code></pre>
+<ul>
+<li>源码增加模块 USB 转串口驱动，option_ids 结构体列表中增加模块的 vid:pid，根据厂家手册，屏蔽对应的 usb 端口，增加了高兴新的 4G、5G 模块 id，同时屏蔽了 3，4，5 的 usb 端口。</li>
+</ul>
+<pre><code class="language-bash">vi drivers/usb/serial/option.c
+######文件修改内容如下######
+{ USB_DEVICE(0x305a, 0x1406)}, /* GOSUNCN */
+######文件修改内容结束######
+</code></pre>
+<ul>
+<li>
+<p>问题排查之 lsusb 无法识别。</p>
+<ol>
+<li>确定模块是否插入 。</li>
+<li>平台 usb 驱动是否正确加载 。</li>
+<li>模块是否上电，一般设备有 GPIO 引脚控制模块电源 。</li>
+<li>模块有异常，可能是模块没有在正确的工作模式。</li>
+</ol>
+</li>
+<li>
+<p>ttyUSBx 的枚举。<br>
+ttyUSB 接口包含了 at 口和 modem 口，at 口出来后，才能实现拨号联网。 如果 ls /dev/ttyUSB*没有枚举，lsusb 可以识别到模块 id，说明模块的 USB 串口驱动未正确加载。</p>
+</li>
+<li>
+<p>控制 4G/5G 模块上下电。</p>
+</li>
+</ul>
+<pre><code class="language-bash"># 1.GPIO查看的起始值
+cat /sys/kernel/debug/gpio
+# 2.GPIO查看label信息
+ll /sys/class/gpio
+cat gpiochip446/label
+cat gpiochip482/label
+# 3.通过GPIO控制模块上下电。根据软硬件接口文档，4G模块的电源控制口线是GPIO2[0],gpio编号就是482，向后顺延GPIO2[1],gpio编号就是483
+echo 482 &gt; /sys/class/gpio/export
+echo out &gt; /sys/class/gpio/gpio482/direction
+echo 0 &gt; /sys/class/gpio/gpio482/value
+</code></pre>
+<ul>
+<li>常用模块拨号命令。</li>
+</ul>
+<pre><code class="language-bash"># 高新兴ME3630-4G
+eserial /dev/ttyUSB1 at+csq                                          # 查询信号强度
+eserial /dev/ttyUSB1 AT+ZECMCALL=1                        # 拨号
+# 广和通NL668-4G
+eserial /dev/ttyUSB1 at+csq                                          # 查询信号强度
+eserial /dev/ttyUSB1 at+gtusbmode=18
+eserial /dev/ttyUSB1 at\$qcrmcall=1,1                         # 拨号
+# 广和通L610-4G
+eserial /dev/ttyUSB1 at+csq                                          # 查询信号强度
+eserial /dev/ttyUSB1 at+gtrndis=1,1                            # 拨号
+# 广和通FM150-5G
+eserial /dev/ttyUSB1 at+cesq                                        # 查询信号强度
+eserial /dev/ttyUSB1 at\$qcrmcall=1,1                         # 拨号
+# 广和通FM650-5G
+eserial /dev/ttyUSB1 at+cesq                                        # 查询信号强度
+eserial /dev/ttyUSB1 at+gtrndis=1,1,3                         # 拨号
+# 移远RM500U-5G
+eserial /dev/ttyUSB1 at+csq                                          # 查询信号强度
+eserial /dev/ttyUSB1 at+qnetdevctl=1,1,1                   # 拨号
+# 有方N511-5G
+eserial /dev/ttyUSB1 at+cesq                                        # 查询信号强度
+eserial /dev/ttyUSB1 AT+NWNETSHAREACT=1,1,0     # 拨号
+</code></pre>
+<h2 id="wifi-模块测试">👇 WIFI 模块测试</h2>
+<ul>
+<li>通过 lspci 命令，查看模块的型号和 ID 值。</li>
+</ul>
+<pre><code class="language-bash">cat /proc/bus/pci/devices
+</code></pre>
+<ul>
+<li>
+<p>判断驱动是否加载，9287 模块需加载 ath9k 驱动，9882 模块需加载 ath10 驱动，同时系统 /lib/firmware/ath10k 固件目录存在，6174 模块需加载 qca6174 驱动，同时系统 /lib/firmware/qca6174/ 固件目录存在，lsmod 命令查看驱动模块是否加载，cat /proc/bus/pci/devices 也可以看到模块目前已经加载的驱动。</p>
+</li>
+<li>
+<p>用户态配置工具，在 linux 系统下，需要下面三个用户态工具配置 wifi。<br>
+1.iw 命令，用于创建删除无线接口。<br>
+2. 当 ap 模式创建无线热点时，需要 hostapd 工具，版本不要低于 2.7。<br>
+3. 当 sta 模式时，需要 wpa_supplicant 工具。</p>
+</li>
+<li>
+<p>Openwrt 系统下配置 wifi。</p>
+</li>
+</ul>
+<pre><code class="language-bash">uci show wireless                                                               #可以从/etc/config/wireless读出配置
+wifi config                                                                          #生成默认的wifi配置文件，openwrt加载wifi驱动后，如果/etc/config/wireless文件不存在，会自动初生成wifi配置文件
+uci set                                                                                 #设置openwrt的无线参数
+uci set wireless.default_radio0.ssid='ath10k-6174-0'    #运行wifi命令，生效设置的无线参数
+wifi down                                                                           #禁用无线
+</code></pre>
+<pre><code class="language-bash">vi /etc/config/wireless
+######文件修改内容如下######
+config wifi-iface 'default_radio0'
+option device 'radio0'
+option network 'wlan0'
+option mode 'sta'
+option encryption 'psk2'
+option ssid 'wifi名字'
+option key 'wifi密码'
+######文件修改内容结束######
+</code></pre>
+<ul>
+<li>hostapd 是一个用户态用于 AP 和认证服务器的守护进程。它实现了 IEEE 802.11 相关的接入管理，支持 IEEE 802.1X/WPA/WPA2/EAP 认证，RADIUS 客户端，EAP 服务器和 RADIUS 认证服务器。 hostapd 通过配置文件读取配置参数。</li>
+</ul>
+<pre><code class="language-bash">vi /etc/hostapd/hostapd.conf
+######文件修改内容如下######
+driver=nl80211
+logger_syslog=127
+logger_syslog_level=2
+logger_stdout=127
+logger_stdout_level=2
+country_code=CN
+ieee80211d=1
+ieee80211h=1
+hw_mode=a
+beacon_int=100
+channel=36
+tx_queue_data2_burst=2.0
+ieee80211n=1
+ht_coex=0
+ht_capab=[HT40+][SHORT-GI-20][SHORT-GI-40][TX-STBC][DSSS_CCK-40]
+vht_oper_chwidth=1
+vht_oper_centr_freq_seg0_idx=42
+ieee80211ac=1
+vht_capab=[RXLDPC][SHORT-GI-80][TX-STBC-2BY1][RX-STBC-123][MAX-MPDU-11454][MAX-A-MPDU-LEN-EXP0]
+interface=wlan1
+ctrl_interface=/var/run/hostapd
+ap_isolate=1
+use_driver_iface_addr=1
+disassoc_low_ack=1
+preamble=1
+wmm_enabled=1
+ignore_broadcast_ssid=0
+uapsd_advertisement_enabled=1
+wpa_passphrase=csxl83050783
+auth_algs=1
+wpa=2
+wpa_pairwise=CCMP
+ssid=qca6174-5g
+bridge=br-lan
+wpa_disable_eapol_key_retries=0
+wpa_key_mgmt=WPA-PSK
+okc=0
+disable_pmksa_caching=1
+######文件修改内容结束######
+</code></pre>
+<ul>
+<li>wpa_supplicant 用于连接无线热点，支持支持 IEEE 802.1X/WPA/WPA2 认证。 wpa_supplicant 通过配置读取 wifi 参数。</li>
+</ul>
+<pre><code class="language-bash">wpa_supplicant.conf
+######文件修改内容如下######
+network={
+  scan_ssid=1                    #扫描信号是否存在
+  ssid=&quot;ath10k-6174-1&quot;    #要连接的热点名称
+  key_mgmt=WPA-PSK     #共享秘钥认证
+  psk=&quot;12345678&quot;             #密码
+  proto=RSN                     #wpa2加密协议
+  beacon_int=100             #检测信标间隔
+}
+######文件修改内容结束######
+</code></pre>
+<pre><code class="language-bash">步骤1：ip addr
+步骤2：ip link set wlp0s0 up（wlp0s0是我的网卡）
+步骤3：wpa_supplicant -B -i wlp0s0 -c &lt;(wpa_passphrase “WIFI名称” “密码”)
+步骤4：dhclient wlp0s0
+步骤5：ping 网址（测试）
+</code></pre>
+<h2 id="thank-you-for-browsingenjoy~">😘 Thank you for browsing，Enjoy~</h2>
+]]></content>
+    </entry>
+    <entry>
+        <title type="html"><![CDATA[OpenWrt 编译固件]]></title>
+        <id>https://dustmm.github.io/post/openwrt/</id>
+        <link href="https://dustmm.github.io/post/openwrt/">
+        </link>
+        <updated>2024-07-31T08:01:25.000Z</updated>
+        <content type="html"><![CDATA[<p>👏 欢迎使用<strong>OpenWrt</strong>，<a href="https://openwrt.org/">OpenWrt</a> 是一个高度可定制化的开源项目，它为嵌入式设备提供了一套强大的操作系统。本教程将指导你如何在自己的系统上编译 OpenWrt，让你能够为你的路由器或其他嵌入式设备创建一个定制的固件！</p>
+<h2 id="前期准备工作">👇 前期准备工作</h2>
+<p>在开始编译 OpenWrt 之前，请确保你的系统满足以下要求：</p>
+<ul>
+<li>操作系统：Linux、BSD 或 macOS（Windows 用户可以通过 WSL2 使用 Linux 环境）</li>
+<li>处理器：至少 2 GHz 双核处理器。</li>
+<li>内存：至少 4 GB RAM</li>
+<li>硬盘空间：至少 10 GB 可用空间。</li>
+<li>依赖软件：<code>git</code>, <code>gcc</code>, <code>binutils</code>, <code>bzip2</code>, <code>flex</code>, <code>python</code>, <code>perl</code>, <code>make</code>, <code>findutils</code>, <code>grep</code>, <code>sed</code>, <code>awk</code>, <code>diff</code>, <code>patch</code>等。</li>
+</ul>
+<p>对于 Ubuntu/Debian 系统，可以通过以下命令安装所需的依赖。对于其他系统，请根据你的发行版安装相应的软件包。</p>
+<pre><code class="language-bash">sudo apt update -y
+sudo apt full-upgrade -y
+sudo apt install -y ack antlr3 asciidoc autoconf automake autopoint binutils bison build-essential \
+bzip2 ccache cmake cpio curl device-tree-compiler fastjar flex gawk gettext gcc-multilib g++-multilib \
+git gperf haveged help2man intltool libc6-dev-i386 libelf-dev libfuse-dev libglib2.0-dev libgmp3-dev \
+libltdl-dev libmpc-dev libmpfr-dev libncurses5-dev libncursesw5-dev libpython3-dev libreadline-dev \
+libssl-dev libtool lrzsz mkisofs msmtp ninja-build p7zip p7zip-full patch pkgconf python2.7 python3 \
+python3-pyelftools python3-setuptools qemu-utils rsync scons squashfs-tools subversion swig texinfo \
+uglifyjs upx-ucl unzip vim wget xmlto xxd zlib1g-dev
+</code></pre>
+<p><strong>注意千万不要使用 root 用户进行编译操作。</strong></p>
+<h2 id="下载仓库源码">👇 下载仓库源码</h2>
+<ul>
+<li>由于我使用并非官方 OpenWrt，本文不对下载源码进行过多描述，此部分内容仅供参考。</li>
+</ul>
+<pre><code class="language-bash">git clone https://github.com/coolsnowwolf/lede
+cd lede
+./scripts/feeds update -a
+./scripts/feeds install -a
+make menuconfig
+</code></pre>
+<h2 id="自定义应用">👇 自定义应用</h2>
+<ul>
+<li>分享一些个人添加的常用应用。如 diff、i2c-tools、pciutils、usbutils、libstdcpp、jansson（版本需要 2.13.1)、libaio、libevent、mount、wget、fio、lsblk、lscpu、auto-factory、lsscsi、taskset、ntpdate、无线用 hostapd-utils、wireless-tools、wpa-supplicant 等。</li>
+</ul>
+<pre><code class="language-bash">#make menuconfig
+wget
+i2c-tools
+#make kernel_menuconfig
+CONFIG_XSPEED_CONFIG_LOCK        # 硬件锁eeprom/spi驱动
+GPIO_SYSFS                                         # gpio驱动
+LEDS_BRIGHTNESS_HW_CHANGED   # LED驱动
+LEDS_TRIGGER_DEFAULT_ON             # LED驱动定时器触发支持
+USB_SERIAL_OPTION                          # USB串口驱动
+RTC_DRV_PCF8563                              # RTC驱动
+WATCHDOG                                         # 看门狗
+CONFIG_USB_NET_CDCETHER           # USB网卡驱动
+</code></pre>
+<ul>
+<li>介绍一些市面上比较常见使用的插件，按需自行添加。</li>
+</ul>
+<pre><code class="language-bash">luci-app-firewall                             # 防火墙和端口转发,必备
+luci-app-adbyby-plus                    # 广告屏蔽大师 Plus+
+luci-app-sfe                                    # Turbo ACC 网络加速(开启 Fast Path 转发加速)
+luci-app-unblockNeteaseMusic    # 解锁网易云
+luci-app-wol                                   # 网络唤醒
+luci-app-accesscontrol                  # 上网时间控制
+luci-app-arpbind                            # IP/MAC 绑定
+luci-app-autoreboot                      # 计划重启
+luci-app-ddns                                 # 动态域名解析
+luci-app-filetransfer                       # 上传 ipk 文件功能
+luci-app-frpc                                   # 内网穿透 Frp
+luci-app-ipsec-vpnd                       # IPSec 服务端
+luci-app-nlbwmon                          # 网络带宽监视器
+luci-app-ramfree                            # 释放内存
+luci-app-rclone                               # rclone
+luci-app-samba                              # 网络共享（samba）
+luci-app-upnp                                # 通用即插即用 UPnP(端口自动转发)
+luci-app-vlmcsd                             # KMS 服务器（WIN 激活工具）
+luci-app-vsftpd                              # FTP 服务器
+luci-app-webadmin                       # Web 管理页面设置
+luci-app-xlnetacc                           # 迅雷下载
+luci-app-zerotier                            # 虚拟局域网
+luci-app-aria2                                # Aria2 下载
+luci-app-hd-idle                            # 硬盘休眠
+luci-app-mwan3                            # MWAN 负载均衡
+luci-app-openvpn                         # OpenVPN 客户端
+luci-app-openvpn-server              # OpenVPN 服务端
+luci-app-pptp-server                    # PPTP 服务端
+luci-app-sqm                                 # 流量智能队列管理(QOS)
+luci-app-transmission                   # BT 下载
+luci-app-usb-printer                     # USB 打印服务器
+luci-app-wireguard                       # VPN 服务器 WireGuard 状态
+luci-app-wrtbwmon                      # 实时流量监测
+</code></pre>
+<h2 id="设备树部分">👇 设备树部分</h2>
+<ul>
+<li>系统启动需要内核镜像和设备树文件，即 dtb 文件。设备树文件在内核中的 arch/arm64/boot/dts/ 对应平台路径下。客户可以通过 dts 文件，修改 sysfs-led 的控制，gpio-keys 控制，以太网和交换芯片 DSA 等配置。</li>
+</ul>
+<pre><code class="language-bash">arch/arm64/boot/dts/marvell/armada-3720-nmxx.dts                                    # Armada平台
+arch/arm64/boot/dts/rockchip/rk3566-xspeed-ra01-v010-linux_cfg1.dts     # RK平台
+</code></pre>
+<ul>
+<li>设备树关于灯的配置。</li>
+</ul>
+<pre><code class="language-bash">gpio-leds {
+	compatible = &quot;gpio-leds&quot;;
+	led-1 {
+    		label = &quot;DB1&quot;;
+			linux,default-trigger = &quot;timer&quot;;
+			gpios = &lt;&amp;gpio1 RK_PA6 GPIO_ACTIVE_LOW&gt;;
+			default-state = &quot;on&quot;;
+		};
+};
+</code></pre>
+<h2 id="固件定制化部分">👇 固件定制化部分</h2>
+<ul>
+<li>修改 boot 文件，使其开机运行自定义脚本。</li>
+</ul>
+<pre><code class="language-bash">vi package/base-files/files/etc/init.d/boot
+######文件修改内容如下######
+#!/bin/sh /etc/rc.common
+# Copyright (C) 2006-2011 OpenWrt.org
+
+START=10
+STOP=98
+
+uci_apply_defaults() {
+        . /lib/functions/system.sh
+
+        cd /etc/uci-defaults || return 0
+        files=&quot;$(ls)&quot;
+        [ -z &quot;$files&quot; ] &amp;&amp; return 0
+        mkdir -p /tmp/.uci
+        for file in $files; do
+                ( . &quot;./$(basename $file)&quot; ) &amp;&amp; rm -f &quot;$file&quot;
+        done
+        uci commit
+}
+
+update_ate_files() {
+        blkdev=$(cat /proc/cmdline |awk -F 'rootdev=' '{print$2}'|awk '{print $1}')
+        if [ &quot;${blkdev}&quot; = &quot;&quot; ]
+        then
+                blkdev=&quot;/dev/sda1&quot;
+                echo &quot;rootdev is null,set it is ${blkdev} !&quot;
+        else
+                echo &quot;The rootdev is ${blkdev} !&quot;
+        fi
+
+        if [ -b &quot;$blkdev&quot; ];then
+                mount &quot;$blkdev&quot; /mnt
+                /mnt/ate/ateinit.sh
+                umount /mnt
+        fi
+}
+
+boot() {
+        [ -f /proc/mounts ] || /sbin/mount_root
+        [ -f /proc/jffs2_bbc ] &amp;&amp; echo &quot;S&quot; &gt; /proc/jffs2_bbc
+        [ -f /proc/net/vlan/config ] &amp;&amp; vconfig set_name_type DEV_PLUS_VID_NO_PAD
+
+        mkdir -p /var/run
+        mkdir -p /var/log
+        mkdir -p /var/lock
+        mkdir -p /var/state
+        mkdir -p /var/tmp
+        mkdir -p /tmp/.uci
+        chmod 0700 /tmp/.uci
+        touch /var/log/wtmp
+        touch /var/log/lastlog
+        touch /tmp/resolv.conf.auto
+        ln -sf /tmp/resolv.conf.auto /tmp/resolv.conf
+        grep -q debugfs /proc/filesystems &amp;&amp; /bin/mount -o noatime -t debugfs debugfs /sys/kernel/debug
+        [ &quot;$FAILSAFE&quot; = &quot;true&quot; ] &amp;&amp; touch /tmp/.failsafe
+
+        #update auto factory test files
+        update_ate_files
+
+        /sbin/kmodloader
+
+        [ ! -f /etc/config/wireless ] &amp;&amp; {
+                # compat for brcm47xx and mvebu
+                sleep 1
+        }
+
+        /bin/config_generate
+        uci_apply_defaults
+
+        # temporary hack until configd exists
+        /sbin/reload_config
+}
+######文件修改内容结束######
+</code></pre>
+<ul>
+<li>修改 login.sh 使其串口登录需要密码。</li>
+</ul>
+<pre><code class="language-bash">vi package/base-files/files/usr/libexec/login.sh
+######文件修改内容如下######
+#!/bin/sh
+
+[ &quot;$(uci -q get system.@system[0].ttylogin)&quot; == 1 ] || exec /bin/login
+
+exec /bin/login
+######文件修改内容结束######
+</code></pre>
+<ul>
+<li>修改 shadow 文件，实现 root 用户拥有密码密码。</li>
+</ul>
+<pre><code class="language-bash">vi package/base-files/files/etc/shadow
+######文件修改内容如下######
+root:$1$7aqew7Sj$fsoq.EmzVZK8r7oLAJQrc0:18738:0:99999:7:::
+daemon:*:0:0:99999:7:::
+ftp:*:0:0:99999:7:::
+network:*:0:0:99999:7:::
+nobody:*:0:0:99999:7:::
+######文件修改内容结束######
+</code></pre>
+<ul>
+<li>设置默认的 network 配置。</li>
+</ul>
+<pre><code class="language-bash">vi package/base-files/files/etc/config/network
+######文件修改内容如下######
+config interface 'loopback'
+        option ifname 'lo'
+        option proto 'static'
+        option ipaddr '127.0.0.1'
+        option netmask '255.0.0.0'
+
+config globals 'globals'
+        option ula_prefix 'fd28:36e7:8f84::/48'
+
+config interface 'wan'
+        option ifname 'MGMT'
+        option proto 'dhcp'
+
+config interface 'lte'
+        option ifname 'usb0'
+        option metric '2'
+        option proto 'dhcp'
+        option disabled '1'
+
+config interface 'wwan'
+        option metric '2'
+        option proto 'dhcp'
+
+config interface 'ppp'
+        option proto '3g'
+        option device '/dev/ttyUSB0'
+        option service 'umts'
+        option pppname 'ppp'
+        option metric '2'
+        option disabled '1'
+######文件修改内容结束######
+</code></pre>
+<ul>
+<li>设备 hostname 的修改操作，将 OpenWrt 替换为成你需要的名称。或者直接修改设备的 /etc/config/system 文件。</li>
+</ul>
+<pre><code class="language-bash">vi package/base-files/files/bin/config_generate
+######文件修改内容如下######
+                delete system.@system[0]
+                add system system
+                set system.@system[-1].hostname='OpenWrt'
+                set system.@system[-1].timezone='UTC'
+                set system.@system[-1].ttylogin='0'
+                set system.@system[-1].log_size='64'
+                set system.@system[-1].urandom_seed='0'
+######文件修改内容结束######
+</code></pre>
+<ul>
+<li>修改设备默认的 ssid 名字。</li>
+</ul>
+<pre><code class="language-bash">vi package/kernel/mac80211/files/lib/wifi/mac80211.sh
+######文件修改内容如下######
+set wireless.default_${name}.ssid=OpenWrt		 	# wifi名称
+set wireless.default_${name}.encryption=psk2		# wifi加密方式，没有是none
+set wireless.default_radio${devidx}.key=12345678	# wifi密码
+######文件修改内容结束######
+</code></pre>
+<ul>
+<li>设备终端的 banner 修改，可以使用 figlet 工具生成空心字。</li>
+</ul>
+<pre><code class="language-bash">figlet -f big HuangYanJie
+vi package/base-files/files/etc/banner
+######文件修改内容如下######
+ _    _                      __     __              _ _
+| |  | |                     \ \   / /             | (_)
+| |__| |_   _  __ _ _ __   __ \ \_/ /_ _ _ __      | |_  ___
+|  __  | | | |/ _` | '_ \ / _` \   / _` | '_ \ _   | | |/ _ \
+| |  | | |_| | (_| | | | | (_| || | (_| | | | | |__| | |  __/
+|_|  |_|\__,_|\__,_|_| |_|\__, ||_|\__,_|_| |_|\____/|_|\___|
+                           __/ |
+                          |___/
+######文件修改内容结束######
+</code></pre>
+<ul>
+<li>修改默认 IP，默认 ip 是 192.168.1.1，我们也可以设置成我们特殊需要的 IP</li>
+</ul>
+<pre><code class="language-bash">vi package/base-files/files/bin/config_generate
+######文件修改内容如下######
+static)
+        local ipad
+        case &quot;$1&quot; in
+                lan) ipad=${ipaddr:-&quot;192.168.1.1&quot;} ;;
+                *) ipad=${ipaddr:-&quot;192.168.$((addr_offset++)).1&quot;} ;;
+        esac
+######文件修改内容结束######
+</code></pre>
+<ul>
+<li>关于增加luci的操作可以参考<a href="https://mp.weixin.qq.com/s/p8ov1ZipJaEDkQVcCDxrVQ">链接</a>。</li>
+</ul>
+<h2 id="thank-you-for-browsingenjoy~">😘 Thank you for browsing，Enjoy~</h2>
+]]></content>
+    </entry>
+    <entry>
+        <title type="html"><![CDATA[Linux 个人常用命令]]></title>
+        <id>https://dustmm.github.io/post/linux/</id>
+        <link href="https://dustmm.github.io/post/linux/">
+        </link>
+        <updated>2024-07-30T06:41:20.000Z</updated>
+        <content type="html"><![CDATA[<p>👏 欢迎使用<strong>Linux</strong>，本文主要记录个人 Linux 使用过程中一些常见常用的命令！</p>
+<h1 id="系统相关命令操作">👉系统相关命令操作👈</h1>
+<h2 id="查看系统日志">👇 查看系统日志</h2>
+<pre><code class="language-bash">dmesg
+</code></pre>
+<h2 id="查看系统内核信息">👇 查看系统内核信息</h2>
+<pre><code class="language-bash">uname -a
+</code></pre>
+<h2 id="查看系统内核版本">👇 查看系统内核版本</h2>
+<pre><code class="language-bash">cat /proc/version
+</code></pre>
+<h2 id="查看当前用户环境变量">👇 查看当前用户环境变量</h2>
+<pre><code class="language-bash">env
+</code></pre>
+<h2 id="查看系统-cpu-信息">👇 查看系统 CPU 信息</h2>
+<ul>
+<li>查看有几个逻辑 cpu，包括 cpu 型号。</li>
+</ul>
+<pre><code class="language-bash">cat /proc/cpuinfo | grep name | cut -f2 -d: | uniq -c
+</code></pre>
+<ul>
+<li>查看有几颗 cpu，每颗分别是几核。</li>
+</ul>
+<pre><code class="language-bash">cat /proc/cpuinfo | grep physical | uniq -c
+</code></pre>
+<ul>
+<li>查看当前 CPU 运行在 32bit 还是 64bit 模式下，如果是运行在 32bit 下也不代表 CPU 不支持 64bit</li>
+</ul>
+<pre><code class="language-bash">getconf LONG_BIT
+</code></pre>
+<ul>
+<li>结果大于 0，说明支持 64bit 计算。lm 指 long mode，支持 lm 则是 64bit</li>
+</ul>
+<pre><code class="language-bash">cat /proc/cpuinfo | grep flags | grep ' lm ' | wc -l
+</code></pre>
+<h2 id="ssh-公钥相关">👇 SSH 公钥相关</h2>
+<ul>
+<li>创建公钥私钥，过程中按三次回车，进入 /root/.ssh/ 文件夹，其中 id_rsa 为私钥 id_rsa.pub 为公钥。</li>
+</ul>
+<pre><code class="language-bash">ssh-keygen -t rsa
+</code></pre>
+<ul>
+<li>删除公钥。</li>
+</ul>
+<pre><code class="language-bash">ssh-keygen -R 192.168.100.140
+</code></pre>
+<ul>
+<li>SSH 服务重启。</li>
+</ul>
+<pre><code class="language-bash">sudo /etc/init.d/ssh restart
+</code></pre>
+<h2 id="命令重命名">👇 命令重命名</h2>
+<pre><code class="language-bash">alias ll='ls -alF'
+</code></pre>
+<h2 id="查看命令路径">👇 查看命令路径</h2>
+<pre><code class="language-bash">which ls    # which &lt;命令&gt;
+</code></pre>
+<h2 id="后台运行命令">👇 后台运行命令</h2>
+<ul>
+<li>后台运行，并且有 nohup.out 输出。</li>
+</ul>
+<pre><code class="language-bash">nohup xxx &amp;
+</code></pre>
+<ul>
+<li>后台运行，不输出任何日志。</li>
+</ul>
+<pre><code class="language-bash">nohup xxx &gt; /dev/null &amp;
+</code></pre>
+<ul>
+<li>后台运行，并将错误信息做标准输出到日志中。</li>
+</ul>
+<pre><code class="language-bash">nohup xxx &gt;out.log 2&gt;&amp;1 &amp;
+</code></pre>
+<h2 id="后台进程相关">👇 后台进程相关</h2>
+<ul>
+<li>查看进程树找到服务器进程。</li>
+</ul>
+<pre><code class="language-bash">ps auwxf
+</code></pre>
+<ul>
+<li>强制关闭进程名包含 xxx 的所有进程。</li>
+</ul>
+<pre><code class="language-bash">ps aux|grep xxx | grep -v grep | awk '{print $2}' | xargs kill -9
+</code></pre>
+<h1 id="磁盘文件目录相关操作">👉磁盘，文件，目录相关操作👈</h1>
+<h2 id="查看磁盘信息">👇 查看磁盘信息</h2>
+<ul>
+<li>查看磁盘挂载情况。</li>
+</ul>
+<pre><code class="language-bash">mount
+</code></pre>
+<ul>
+<li>查看磁盘分区信息。</li>
+</ul>
+<pre><code class="language-bash">df
+</code></pre>
+<ul>
+<li>查看目录及子目录大小。</li>
+</ul>
+<pre><code class="language-bash">du -H -h
+</code></pre>
+<ul>
+<li>查看当前目录下各个文件，文件夹占了多少空间，不会递归。</li>
+</ul>
+<pre><code class="language-bash">du -sh *
+</code></pre>
+<h2 id="新建文件">👇 新建文件</h2>
+<pre><code class="language-bash">touch aging_net.json
+</code></pre>
+<h2 id="新建文件夹">👇 新建文件夹</h2>
+<pre><code class="language-bash">mkdir -p xxx
+</code></pre>
+<h2 id="复制文件夹">👇 复制文件夹</h2>
+<pre><code class="language-bash">cp -r xxx yyy    # cp -r &lt;源文件夹&gt; &lt;目标文件夹&gt;
+</code></pre>
+<h2 id="清空文件内容">👇 清空文件内容</h2>
+<pre><code class="language-bash">cp /dev/null aging-res.log
+dd if=/dev/null of=aging-res.log
+</code></pre>
+<h2 id="建立软连接">👇 建立软连接</h2>
+<pre><code class="language-bash">ln -s /tmp/auto-factory.service auto-factory.service    # ln -s &lt;目标文件或目录&gt; &lt;链接文件名&gt;
+</code></pre>
+<h2 id="wc-命令相关">👇 WC 命令相关</h2>
+<ul>
+<li>查看文件里有多少行。</li>
+</ul>
+<pre><code class="language-bash">wc -l filename
+</code></pre>
+<ul>
+<li>查看文件里有多少个 word。</li>
+</ul>
+<pre><code class="language-bash">wc -w filename
+</code></pre>
+<ul>
+<li>查看文件里最长的那一行是多少个字。</li>
+</ul>
+<pre><code class="language-bash">wc -L filename
+</code></pre>
+<h2 id="压缩命令相关">👇 压缩命令相关</h2>
+<pre><code class="language-bash">tar czvf xxx.tar xxx    # tar czvf xxx.tar &lt;压缩目录&gt;
+zip -r xxx.zip xxx       # zip -r xxx.zip &lt;压缩目录&gt;
+</code></pre>
+<h2 id="解压命令相关">👇 解压命令相关</h2>
+<ul>
+<li>解压到指定文件夹。</li>
+</ul>
+<pre><code class="language-bash">tar zxvf xxx.tar -C /xxx/yyy/    # tar zxvf xxx.tar -C &lt;解压目录&gt;
+tar jxvf xxx.tar -C /xxx/yyy/     # tar jxvf xx.tar.bz2 -C &lt;解压目录&gt;
+unzip xxx.zip
+</code></pre>
+<h2 id="设置文件所属属性">👇 设置文件所属属性</h2>
+<pre><code class="language-bash">chown hyj.hyj xxx.log
+</code></pre>
+<h2 id="scp-传输文件">👇 SCP 传输文件</h2>
+<ul>
+<li>拷贝设备文件到电脑。</li>
+</ul>
+<pre><code class="language-bash">scp root@192.168.100.141:/root/a.pcap .
+</code></pre>
+<ul>
+<li>拷贝电脑文件到设备。</li>
+</ul>
+<pre><code class="language-bash">scp .\wtmi_h.bin root@192.168.189.1:wtp
+</code></pre>
+<h2 id="格式化磁盘">👇 格式化磁盘</h2>
+<ul>
+<li>使用自定义脚本来进行格式化操作。</li>
+</ul>
+<pre><code class="language-bash">/usr/sbin/parted.sh init sda &gt; /dev/null 2&gt;&amp;1
+/usr/sbin/parted.sh add sda 1 1G 83&gt; /dev/null 2&gt;&amp;1
+mkfs.ext4 -F /dev/sda1 &gt; /dev/null 2&gt;&amp;1
+</code></pre>
+<h1 id="网络相关命令操作">👉网络相关命令操作👈</h1>
+<h2 id="网络重启">👇 网络重启</h2>
+<pre><code class="language-bash">service network restart
+</code></pre>
+<h2 id="网口相关设置">👇 网口相关设置</h2>
+<ul>
+<li>查看网卡信息。</li>
+</ul>
+<pre><code class="language-bash">ls -l /sys/class/net/
+</code></pre>
+<ul>
+<li>网卡自适应关闭，并设置网卡的速度为 100Mbps，全双工模式。</li>
+</ul>
+<pre><code class="language-bash">ethtool -s ge0 speed 100 duplex full autoneg off
+</code></pre>
+<ul>
+<li>网卡自适应开启。</li>
+</ul>
+<pre><code class="language-bash">ethtool -s ge0 autoneg on
+</code></pre>
+<ul>
+<li>网卡切换 combo</li>
+</ul>
+<pre><code class="language-bash">echo 0 &gt; /sys/class/net/ge0/combo_status
+</code></pre>
+<h1 id="uboot-下相关命令操作">👉Uboot 下相关命令操作👈</h1>
+<h2 id="uboot-下读取寄存器">👇 Uboot 下读取寄存器</h2>
+<ul>
+<li>Uboot 下 Mac 信息读取。</li>
+</ul>
+<pre><code class="language-bash">i2c dev 1
+i2c md 0x52 0 16          # 从第0个寄存器开始读，共读16个寄存器
+i2c mw 0x52 1e 0x30    # 第01号寄存器，将它第01号寄存器的值写为0x30，是字符0
+i2c mw 0x52 1f 0x30
+i2c mw 0x52 20 0x31
+</code></pre>
+<h2 id="thank-you-for-browsingenjoy~">😘 Thank you for browsing，Enjoy~</h2>
+]]></content>
+    </entry>
+    <entry>
+        <title type="html"><![CDATA[Samba 服务器的配置]]></title>
+        <id>https://dustmm.github.io/post/samba/</id>
+        <link href="https://dustmm.github.io/post/samba/">
+        </link>
+        <updated>2024-07-29T09:22:59.000Z</updated>
+        <content type="html"><![CDATA[<p>👏 欢迎使用<strong>Samba</strong>，本文以 Ubuntu 环境为例，Samba 是在 Linux 系统上实现 SMB 协议的一个免费软件，以实现文件共享和打印机服务共享！</p>
+<h2 id="安装-samba">👇 安装 Samba</h2>
+<pre><code class="language-bash">sudo apt-get install samba
+</code></pre>
+<h2 id="创建共享目录">👇 创建共享目录</h2>
+<pre><code class="language-bash">mkdir /data/samba
+</code></pre>
+<h2 id="创建-samba-账户">👇 创建 Samba 账户</h2>
+<ul>
+<li>新建 Samba 账户。</li>
+</ul>
+<pre><code class="language-bash">useradd -d /data/samba -s /sbin/nologin root-samba
+useradd -d /data/samba -s /sbin/nologin hyj-samba
+</code></pre>
+<ul>
+<li>管理 Samba 用户。</li>
+</ul>
+<pre><code class="language-bash">pdbedit -a -u root-samba
+pdbedit -a -u hyj-samba
+</code></pre>
+<ul>
+<li>查看 Samba 账户列表。</li>
+</ul>
+<pre><code class="language-bash">pdbedit -L
+</code></pre>
+<h2 id="设置共享目录权限">👇 设置共享目录权限</h2>
+<ul>
+<li>设置 root-samba 管理员权限。</li>
+</ul>
+<pre><code class="language-bash">mkdir /data/samba/test
+chown -R root-samba.root-samba /data/samba/
+chmod -R 700 /data/samba/test
+</code></pre>
+<ul>
+<li>设置 hyj-samba 权限。</li>
+</ul>
+<pre><code class="language-bash">setfacl -R -m u:hyj-samba:rx /data/samba/test
+</code></pre>
+<h2 id="samba-服务配置">👇 Samba 服务配置</h2>
+<ul>
+<li>设置 Samba 服务配置。</li>
+</ul>
+<pre><code class="language-bash">vi  /etc/samba/smb.conf
+######文件修改内容如下######
+[share]
+comment = share folder
+path = /data/samba
+public = no
+# valid users = root-samba,hyj-samba,@samba
+# printable = no
+directory mask = 0777
+write list = root-samba
+read list = root-samba,hyj-samba
+######文件修改内容结束######
+</code></pre>
+<ul>
+<li>重启 Samba 服务。</li>
+</ul>
+<pre><code class="language-bash">service smbd restart
+</code></pre>
+<h2 id="windows-测试权限">👇 Windows 测试权限</h2>
+<ul>
+<li>按键 Ctrl+E，打开此“电脑”，然后点击左侧栏的“网络”，接着在上侧的网络栏目里输入 Samba 地址，然后输入 Samba 账号和密码，就可以登录到 Samba 共享目录了。</li>
+</ul>
+<pre><code class="language-bash">\\192.168.85.11
+</code></pre>
+<ul>
+<li>默认 Windows 下会保持连接，需断开连接重新登陆。</li>
+</ul>
+<pre><code class="language-bash">net use
+net use \\192.168.85.11\share /del /y
+</code></pre>
+<h2 id="thank-you-for-browsingenjoy~">😘 Thank you for browsing，Enjoy~</h2>
+]]></content>
+    </entry>
+    <entry>
+        <title type="html"><![CDATA[安卓 Termux 软件]]></title>
+        <id>https://dustmm.github.io/post/termux/</id>
+        <link href="https://dustmm.github.io/post/termux/">
+        </link>
+        <updated>2024-07-24T08:16:41.000Z</updated>
+        <content type="html"><![CDATA[<p>👏 欢迎使用<strong>Termux</strong>，本文以安卓手机为例，请访问<a href="https://f-droid.org/packages/com.termux/">官方网站</a>下载！</p>
+<h2 id="安装-termux">👇 安装 Termux</h2>
+<ul>
+<li>用上面提供的链接下载安装。</li>
+</ul>
+<h2 id="更换清华源">👇 更换清华源</h2>
+<pre><code class="language-bash">sed -i 's@^\(deb.*stable main\)$@#\1\ndeb https://mirrors.tuna.tsinghua.edu.cn/termux/termux-packages-24 stable main@' $PREFIX/etc/apt/sources.list
+sed -i 's@^\(deb.*games stable\)$@#\1\ndeb https://mirrors.tuna.tsinghua.edu.cn/termux/game-packages-24 games stable@' $PREFIX/etc/apt/sources.list.d/game.list
+sed -i 's@^\(deb.*science stable\)$@#\1\ndeb https://mirrors.tuna.tsinghua.edu.cn/termux/science-packages-24 science stable@' $PREFIX/etc/apt/sources.list.d/science.list
+pkg update
+</code></pre>
+<h2 id="设置用户密码">👇 设置用户密码</h2>
+<ul>
+<li>输入 passwd，输入两次要设置的密码。开启 ssh 服务并查看当前内网地址。</li>
+</ul>
+<pre><code class="language-bash">sshd
+ifconfig
+</code></pre>
+<h2 id="设置-storage-软链接">👇 设置 Storage 软链接</h2>
+<ul>
+<li>在 Termux 中输入以下命令，应该会弹框确认是否授权。成功拿到存储权限后，会在 home 目录生成 storage 目录，并且生成若干目录，软连接都指向外置存储卡的相应目录。</li>
+<li>值得注意的是，storage 目录下有一个 shared 的目录，在这个 shared 目录中映射到我们手机内部存储的目录。</li>
+</ul>
+<h2 id="ssh-远程登录">👇 SSH 远程登录</h2>
+<pre><code class="language-bash">ssh -p 8022 root@192.168.85.137
+</code></pre>
+<h2 id="内网穿透实现">👇 内网穿透实现</h2>
+<ul>
+<li>它会创建一个 DNS 解析文件，路径在 $PREFIX/etc/resolv.conf，里面有配置 DNS 解析服务器地址，默认已经加了 8.8.8.8</li>
+</ul>
+<pre><code class="language-bash">apt install dnsutils
+</code></pre>
+<ul>
+<li>下载最新的 cpolar 客户端。</li>
+</ul>
+<pre><code class="language-bash">curl -O -L https://www.cpolar.com/static/downloads/cpolar-stable-linux-arm.zip
+unzip cpolar-stable-linux-arm.zip
+</code></pre>
+<ul>
+<li>官网下获取认证的 token</li>
+</ul>
+<pre><code class="language-bash">./cpolar authtoken NmJmMTgwMzYtOTE5ZS00YmE0LWE1MDctYjUxYTQ3MDkyZGY2
+</code></pre>
+<ul>
+<li>映射 8000 端口到外网。</li>
+</ul>
+<pre><code class="language-bash">./cpolar http -region=cn 8000
+</code></pre>
+<h2 id="安装-ubuntu">👇 安装 Ubuntu</h2>
+<ul>
+<li>安装 proot-distrot 及 Ubuntu。</li>
+</ul>
+<pre><code class="language-bash">apt install proot-distro
+proot-distro install ubuntu
+</code></pre>
+<ul>
+<li>登录 Ubuntu。</li>
+</ul>
+<pre><code class="language-bash">proot-distro login ubuntu
+</code></pre>
+<ul>
+<li>安装一些必要工具。</li>
+</ul>
+<pre><code class="language-bash">apt update
+apt install vim python3 openssh-server -y
+</code></pre>
+<ul>
+<li>配置一下 ssh 的配置，主要是端口，用于区分外部的 ssh</li>
+</ul>
+<pre><code class="language-bash">vi /etc/ssh/sshd_config
+######文件修改内容如下######
+PermitRootLogin yes
+Port 2222
+######文件修改内容结束######
+service ssh start
+</code></pre>
+<h2 id="thank-you-for-browsingenjoy~">😘 Thank you for browsing，Enjoy~</h2>
+]]></content>
+    </entry>
+    <entry>
+        <title type="html"><![CDATA[GIT 的常用命令操作]]></title>
+        <id>https://dustmm.github.io/post/git-use/</id>
+        <link href="https://dustmm.github.io/post/git-use/">
+        </link>
+        <updated>2024-07-24T07:36:19.000Z</updated>
+        <content type="html"><![CDATA[<p>👏 欢迎使用<strong>GIT</strong>，本文主要记录个人常用的 GIT 操作命令！</p>
+<h2 id="git-提交操作">👇 GIT 提交操作</h2>
+<ul>
+<li>将本地修改操作进行提交。</li>
+</ul>
+<pre><code class="language-bash">git add .
+git status
+git commit -m &quot;提交描述&quot;
+git log
+</code></pre>
+<h2 id="git-暂存操作">👇 GIT 暂存操作</h2>
+<ul>
+<li>将本地修改操作进行暂存。</li>
+</ul>
+<pre><code class="language-bash">git stash
+git stash list
+git pull
+git stash pop
+git stash drop 0    # 删除索引为0的暂存区
+</code></pre>
+<h2 id="git-合并单个提交">👇 GIT 合并单个提交</h2>
+<ul>
+<li>需要把 A 分支上提交的部分代码，放在 B 分支上。</li>
+</ul>
+<pre><code class="language-bash">git checkout B
+git cherry-pick af53a2a6
+git push origin B
+</code></pre>
+<h2 id="git-重新提交">👇 GIT 重新提交</h2>
+<ul>
+<li>撤销最近 n 个提交，变成 add 状态，可以重新提交。</li>
+</ul>
+<pre><code class="language-bash">git reset --soft HEAD~n
+</code></pre>
+<ul>
+<li>回滚最近 n 个提交，代码彻底删除了，找不回来。</li>
+</ul>
+<pre><code class="language-bash">git reset --hard HEAD~1
+</code></pre>
+<ul>
+<li>如果上述提交已经推送远程，需要强制推送到远程。</li>
+</ul>
+<pre><code class="language-bash">git push -f
+</code></pre>
+<h2 id="git-查看提交修改的文件">👇 GIT 查看提交修改的文件</h2>
+<ul>
+<li>查看每条 commoit_id 修改的文件。</li>
+</ul>
+<pre><code class="language-bash">git log --stat
+</code></pre>
+<h2 id="git-撤销掉远程提交">👇 GIT 撤销掉远程提交</h2>
+<ul>
+<li>撤销提交，保留当前工作区。</li>
+</ul>
+<pre><code class="language-bash">git reset --soft 6b418bf0840a9024f610609b320cf7bf4d24cbe4
+</code></pre>
+<ul>
+<li>强制提交当前版本号。</li>
+</ul>
+<pre><code class="language-bash">git push -f
+</code></pre>
+<ul>
+<li>修改代码后，重新提交。</li>
+</ul>
+<h2 id="git-去除-m-的方法">👇 GIT 去除 ^M 的方法</h2>
+<ul>
+<li>如果 git diff 中存在 ^M，查看当前仓库配置信息。</li>
+</ul>
+<pre><code class="language-bash">git config --local --list
+</code></pre>
+<ul>
+<li>查看当前用户（global）配置信息。</li>
+</ul>
+<pre><code class="language-bash">git config --global --list
+</code></pre>
+<ul>
+<li>告诉 GIT 忽略行尾的回车。</li>
+</ul>
+<pre><code class="language-bash">git config --global core.whitespace cr-at-eol
+</code></pre>
+<h2 id="thank-you-for-browsingenjoy~">😘 Thank you for browsing，Enjoy~</h2>
+]]></content>
+    </entry>
+    <entry>
+        <title type="html"><![CDATA[WSL 的安装与使用]]></title>
+        <id>https://dustmm.github.io/post/wsl-install-use/</id>
+        <link href="https://dustmm.github.io/post/wsl-install-use/">
+        </link>
+        <updated>2024-07-23T11:29:13.000Z</updated>
+        <content type="html"><![CDATA[<p>👏 欢迎使用<strong>WSL</strong>，Windows 下的 Linux 子系统，个人感觉比安装虚拟机软件来的好用方便，本文以 WSL 安装 Ubuntu-18.04 进行讲解！</p>
+<h2 id="wsl-的安装">👇 WSL 的安装</h2>
+<ul>
+<li>设置默认安装 WSL Version 为 2</li>
+</ul>
+<pre><code class="language-bash">wsl --set-default-version 2
+</code></pre>
+<ul>
+<li>查看当前可安装发行版。</li>
+</ul>
+<pre><code class="language-bash">wsl --list --online
+</code></pre>
+<ul>
+<li>安装你所需的发行版。</li>
+</ul>
+<pre><code class="language-bash">wsl --install -d Ubuntu-18.04
+</code></pre>
+<ul>
+<li>查看 WSL 信息。</li>
+</ul>
+<pre><code class="language-bash">wsl -l -v
+</code></pre>
+<h2 id="wsl-的导入和导出">👇 WSL 的导入和导出</h2>
+<ul>
+<li>WSL 的开机和关机操作。</li>
+</ul>
+<pre><code class="language-bash">net start LxssManager
+net stop LxssManager
+wsl --shutdown
+</code></pre>
+<ul>
+<li>导出虚拟机。</li>
+</ul>
+<pre><code class="language-bash">wsl --export Ubuntu-18.04 D:\Ubuntu-18.04.tar    # wsl --export &lt;系统版本&gt; &lt;文件名/文件路径&gt;
+</code></pre>
+<ul>
+<li>注销原有已经安装的虚拟机 。</li>
+</ul>
+<pre><code class="language-bash">wsl --unregister Ubuntu-18.04    # wsl --unregister &lt;系统版本&gt;
+</code></pre>
+<ul>
+<li>导入虚拟机至新位置。</li>
+</ul>
+<pre><code class="language-bash">wsl --import Ubuntu-18.04 D:\WSL D:\Ubuntu-18.04.tar    # wsl --import &lt;系统版本&gt; &lt;安装路径&gt; &lt;文件名/文件路径&gt;
+</code></pre>
+<ul>
+<li>设置默认用户。</li>
+</ul>
+<pre><code class="language-bash">vi /etc/wsl.conf
+######文件修改内容如下######
+[user]
+default=hyj
+######文件修改内容结束######
+</code></pre>
+<h2 id="wsl-远程连接操作">👇 WSL 远程连接操作</h2>
+<ul>
+<li>安装 openssh-server 服务，自带的会有问题，需卸载后重新安装。</li>
+</ul>
+<pre><code class="language-bash">sudo apt remove openssh-server     # 卸载
+sudo apt install openssh-server       # 安装
+</code></pre>
+<ul>
+<li>配置 SSH 参数。</li>
+</ul>
+<pre><code class="language-bash">sudo vi /etc/ssh/sshd_config
+######文件修改内容如下######
+Port 22
+PasswordAuthentication yes
+######文件修改内容结束######
+</code></pre>
+<ul>
+<li>重启 SSH 服务。</li>
+</ul>
+<pre><code class="language-bash">sudo service ssh restart
+</code></pre>
+<ul>
+<li>测试 SSH 服务。</li>
+</ul>
+<pre><code class="language-bash"># 测试SSH是否正常
+        # username：wsl用户名
+        # ipadrress：wsl中IP地址
+        # port：上面设置的port22或其他
+ssh username@ipaddress -p port
+</code></pre>
+<ul>
+<li>配置端口转发规则。</li>
+</ul>
+<pre><code class="language-bash"># 配置端口转发
+        # listenaddress:0.0.0.0
+        # listenport:监听端口
+        # connectaddress:WSL ip地址
+        # connectport:WSL sshd_config文件中的Port值
+netsh interface portproxy add v4tov4 listenaddress=0.0.0.0 listenport=2222 connectaddress=172.24.219.130 connectport=22
+</code></pre>
+<ul>
+<li>开启 windows 防火墙入站规则。</li>
+</ul>
+<pre><code class="language-bash">netsh advfirewall firewall add rule name=WSL2 dir=in action=allow protocol=TCP localport=2222
+</code></pre>
+<ul>
+<li>查看转发端口命令。</li>
+</ul>
+<pre><code class="language-bash">netsh interface portproxy show all
+</code></pre>
+<ul>
+<li>删除端口转发命令。</li>
+</ul>
+<pre><code class="language-bash">netsh interface portproxy delete v4tov4 listenport=22 listenaddress=0.0.0.0
+</code></pre>
+<ul>
+<li>局域网其他电脑登录 WSL。</li>
+</ul>
+<pre><code class="language-bash"># 连接WSL命令
+        # username:wsl用户名
+        # ipaddress:wsl IP地址
+        # port:端口转发规则中的listenport
+ssh username@ipaddress -p port
+ssh root@192.168.85.99 -p 2222
+</code></pre>
+<h2 id="thank-you-for-browsingenjoy~">😘 Thank you for browsing，Enjoy~</h2>
+]]></content>
+    </entry>
+    <entry>
+        <title type="html"><![CDATA[Ubuntu 无人值守安装]]></title>
+        <id>https://dustmm.github.io/post/ubuntu-autoinstall/</id>
+        <link href="https://dustmm.github.io/post/ubuntu-autoinstall/">
+        </link>
+        <updated>2024-07-19T07:33:14.000Z</updated>
+        <content type="html"><![CDATA[<p>👏 欢迎使用<strong>Ubuntu</strong>，本文以X86硬件架构为例，请访问<a href="https://cn.ubuntu.com/download">官方镜像站</a>下载！</p>
+<h2 id="ubuntu-系统启动盘">👇 Ubuntu 系统启动盘</h2>
+<ul>
+<li>通过上述下载的镜像，使用 rufus 制作 U 盘启动盘，此过程不做过多赘述！</li>
+</ul>
+<h2 id="u-盘实现无人值守安装">👇 U 盘实现无人值守安装</h2>
+<h3 id="1️⃣-通过-autoinstallyaml-文件实现">1️⃣ 通过 autoinstall.yaml 文件实现</h3>
+<p>该方式无需修改 grub.cfg，在启动盘根目录放置 autoinstall.yaml 文件，启动系统后将自行安装系统。</p>
+<ul>
+<li>autoinstall.yaml 文件内容如下。</li>
+</ul>
+<pre><code class="language-bash">version: 1
+early-commands:
+  - echo 'It is me'
+  - sleep 1
+  - echo 'Use autoinstall'
+locale: en_GB.UTF-8
+apt:
+  mirror-selection:
+    primary:
+      - country-mirror
+      - arches: &amp;id001
+        - amd64
+        - i386
+        uri: http://archive.ubuntu.com/ubuntu/
+      - arches: &amp;id002
+        - s390x
+        - arm64
+        - armhf
+        - powerpc
+        - ppc64el
+        - riscv64
+        uri: http://ports.ubuntu.com/ubuntu-ports
+    preserve_sources_list: false
+    security:
+    - arches: *id001
+      uri: http://security.ubuntu.com/ubuntu/
+    - arches: *id002
+      uri: http://ports.ubuntu.com/ubuntu-ports
+late-commands:
+  - echo late
+  - sleep 1
+  - echo late
+error-commands:
+  - echo OH NOES
+  - sleep 5
+  - echo OH WELL
+
+identity:
+    hostname: ubuntu
+    password: $6$5Y1CqzzfE.WLueH4$AVXtEYRvCb/HSqH8KysClx4z29q1fQIkX0qtHe7KZWOS8gagQ9ZyQBZcXqSWj1Xcvty7waPfwoM/9d44GYmFL1
+    realname: xspeed
+    username: xspeed
+keyboard:
+  layout: gb
+kernel:
+  package: linux-generic
+source:
+  id: ubuntu-server-minimal
+  search_drivers: false
+storage:
+  layout:
+    name: lvm
+</code></pre>
+<h3 id="2️⃣-通过-user-data-文件实现">2️⃣ 通过 user-data 文件实现</h3>
+<p>该方式需修改 grub.cfg，优先级高于 autoinstall.yaml 安装方式，在启动盘根目录放置 user-data 和 meta-data 文件，其中 meta-data 文件是一个以 meta-data 命名的空文件，启动系统后将自行安装系统。</p>
+<ul>
+<li>grub.cfg 文件内容需要注意冒号前分号要加上，否则可能导致传递异常截断。</li>
+</ul>
+<pre><code class="language-bash">linux	/casper/vmlinuz autoinstall ds=nocloud\;s=/cdrom/ console=ttyS0,115200n8 ---
+</code></pre>
+<ul>
+<li>user-data 文件内容如下。</li>
+</ul>
+<pre><code class="language-bash">#cloud-config
+autoinstall:
+  early-commands:
+    - echo 'It is me'
+    - sleep 1
+    - echo 'Use user-data'
+  apt:
+    disable_components: []
+    fallback: abort
+    geoip: true
+    mirror-selection:
+      primary:
+      - country-mirror
+      - arches: &amp;id001
+        - amd64
+        - i386
+        uri: http://archive.ubuntu.com/ubuntu/
+      - arches: &amp;id002
+        - s390x
+        - arm64
+        - armhf
+        - powerpc
+        - ppc64el
+        - riscv64
+        uri: http://ports.ubuntu.com/ubuntu-ports
+    preserve_sources_list: false
+    security:
+    - arches: *id001
+      uri: http://security.ubuntu.com/ubuntu/
+    - arches: *id002
+      uri: http://ports.ubuntu.com/ubuntu-ports
+  codecs:
+    install: false
+  drivers:
+    install: false
+  identity:
+    hostname: ubuntu
+    password: $6$5Y1CqzzfE.WLueH4$AVXtEYRvCb/HSqH8KysClx4z29q1fQIkX0qtHe7KZWOS8gagQ9ZyQBZcXqSWj1Xcvty7waPfwoM/9d44GYmFL1
+    realname: xspeed
+    username: xspeed
+  kernel:
+    package: linux-generic
+  keyboard:
+    layout: us
+    toggle: null
+    variant: ''
+  locale: en_US.UTF-8
+  oem:
+    install: auto
+  source:
+    id: ubuntu-server-minimal
+    search_drivers: false
+  ssh:
+    allow-pw: true
+    authorized-keys: []
+    install-server: false
+  storage:
+    layout:
+      name: lvm
+  updates: security
+  version: 1
+</code></pre>
+<h2 id="网络无人值守安装">👇 网络无人值守安装</h2>
+<p>启动盘仅保留启动文件相关的三个目录，boot，casper，EFI，该方式需修改 grub.cfg，启动系统后将自行安装系统。</p>
+<ul>
+<li>grub.cfg 文件内容需要注意冒号前分号要加上，否则可能导致传递异常截断。</li>
+</ul>
+<pre><code class="language-bash">linux	/casper/vmlinuz ip=dhcp url=http://192.168.85.235:70/chfs/shared/ISO/Ubuntu/ubuntu-22.04.4-live-server-amd64.iso autoinstall ds=nocloud-net\;s=http://192.168.85.235:70/chfs/shared/ISO/Ubuntu/ console=ttyS0,115200n8 ---
+</code></pre>
+<ul>
+<li>需要搭建一个 http 服务，并将本文档描述的 meta-data，user-data，iso 镜像（官网下载）放置在 http 文件服务器上。</li>
+</ul>
+<h2 id="遇坑记录">👇 遇坑记录</h2>
+<ul>
+<li>网络安装时候，使用的设备网卡需具有唯一 mac，否则自动安装将会失败中断。</li>
+<li>使用 user-data 或 autoinstall.yaml 进行无人安装，文件格式需严格按照 yaml 编写，不然会识别不到，导致自动安装异常。</li>
+<li>user-data 需要配合修改 grub.cfg，其中 grub.cfg 指定的 ds 参数带的；需要、进行转义，否则同样会导致自动安装异常。</li>
+</ul>
+<h2 id="thank-you-for-browsingenjoy~">😘 Thank you for browsing，Enjoy~</h2>
+]]></content>
+    </entry>
+    <entry>
+        <title type="html"><![CDATA[Centos 服务器的搭建]]></title>
+        <id>https://dustmm.github.io/post/centos-server/</id>
+        <link href="https://dustmm.github.io/post/centos-server/">
+        </link>
+        <updated>2024-07-18T02:03:14.000Z</updated>
+        <content type="html"><![CDATA[<p>👏 欢迎使用<strong>Centos</strong>，本文以X86硬件架构为例，请访问<a href="https://vault.centos.org/7.6.1810/isos/x86_64/">官方镜像站</a>下载！</p>
+<h2 id="centos-系统安装">👇 Centos 系统安装</h2>
+<ul>
+<li>通过上述下载的镜像，使用 rufus 制作 U 盘启动盘，并记录 U 盘盘符，选择 Troubleshooting，添加 grub 启动参数，否则无输出！</li>
+</ul>
+<pre><code class="language-bash">LABEL=U盘盘符 console=ttyS0,115200n8
+</code></pre>
+<h2 id="调整默认-lvm-分区">👇 调整默认 LVM 分区</h2>
+<p><strong>如果你并不是使用这个分区方式，请无视此部分操作。</strong></p>
+<ul>
+<li>如果已经挂载，先卸载 /home 目录。</li>
+</ul>
+<pre><code class="language-bash">sudo umount /home
+</code></pre>
+<ul>
+<li>删除逻辑卷 centos-home</li>
+</ul>
+<pre><code class="language-bash">sudo lvremove /dev/mapper/centos-home
+</code></pre>
+<ul>
+<li>调整 centos-swap 逻辑卷的大小为 8GB</li>
+</ul>
+<pre><code class="language-bash">sudo lvresize -L 8G /dev/mapper/centos-swap
+</code></pre>
+<ul>
+<li>扩展 centos-root 逻辑卷以包含剩余空间。</li>
+</ul>
+<pre><code class="language-bash">sudo lvextend -l +100%FREE /dev/mapper/centos-root
+</code></pre>
+<ul>
+<li>如果 centos-root 包含文件系统，需要调整文件系统大小。</li>
+</ul>
+<pre><code class="language-bash">sudo resize2fs /dev/mapper/centos-root
+</code></pre>
+<ul>
+<li>如果是文件系统是 xfs 格式。</li>
+</ul>
+<pre><code class="language-bash">xfs_growfs /dev/mapper/centos-root
+</code></pre>
+<ul>
+<li>缩小分区操作。</li>
+</ul>
+<pre><code class="language-bash">lvreduce -L -10G /dev/mapper/cl-root
+</code></pre>
+<ul>
+<li>确认逻辑卷大小调整和文件系统扩展是否成功。</li>
+</ul>
+<pre><code class="language-bash">df -h
+</code></pre>
+<ul>
+<li>在 /etc/fstab 中设置自动挂载。</li>
+</ul>
+<pre><code class="language-bash">vi /etc/fstab
+######文件修改内容如下######
+UUID=bd0382af-caa1-4446-9215-085ad3fe4241 /home ext4  defaults  0 0
+######文件修改内容结束######
+</code></pre>
+<h2 id="驱动的更新替换">👇 驱动的更新替换</h2>
+<p><strong>因为我使用的硬件差异，网卡驱动方面需要额外编译二次开发的新驱动替换默认镜像的驱动。</strong></p>
+<ul>
+<li>安装 gcc 编译环境，到 gcc 文件夹路径下，rpm 安装编译环境。</li>
+</ul>
+<pre><code class="language-bash">uname -r
+mount /dev/sdb1 /mnt
+cd /mnt/gcc-3.10.0-1160/
+rpm -ivh * --nodeps --force
+</code></pre>
+<ul>
+<li>ice 驱动，进入 src 目录下，进行编译安装。</li>
+</ul>
+<pre><code class="language-bash">make
+make install
+</code></pre>
+<ul>
+<li>ixgbe 驱动，进入 src 目录下，进行编译安装。</li>
+</ul>
+<pre><code class="language-bash">make
+make install
+</code></pre>
+<ul>
+<li>igc 驱动，i225、i226 网卡驱动，进入 igc 目录下，进行编译安装。</li>
+</ul>
+<pre><code class="language-bash">./autorun.sh
+</code></pre>
+<h2 id="安装-libevent-环境">👇 安装 Libevent 环境</h2>
+<ul>
+<li>我有工程依赖于 libevent 环境，所以需要安装它，并更新动态链接库。</li>
+</ul>
+<pre><code class="language-bash">tar -zxvf libevent-2.1.11-stable.tar.gz
+cd libevent-2.1.11-stable
+./configure
+make
+make install
+ldconfig
+</code></pre>
+<h2 id="网口命名方式调整">👇 网口命名方式调整</h2>
+<ul>
+<li>调整网络接口重新命名回传统的 ethX 格式，可以通过编辑 /etc/default/grub 文件，修改为 net.ifnames=0</li>
+</ul>
+<pre><code class="language-bash">GRUB_CMDLINE_LINUX=&quot;crashkernel=auto rd.lvm.lv=centos/root rd.lvm.lv=centos/swap console=ttyS0,115200n8 net.ifnames=0 biosdevname=0&quot;
+</code></pre>
+<h2 id="系统源失败问题">👇 系统源失败问题</h2>
+<ul>
+<li>添加 nameserver，解决网络问题。</li>
+</ul>
+<pre><code class="language-bash">vi /etc/resolv.conf
+######文件修改内容如下######
+nameserver 8.8.8.8
+nameserver 8.8.8.4
+nameserver 8.8.4.4
+######文件修改内容结束######
+</code></pre>
+<ul>
+<li>删除本地源，下载阿里云配置，解决源问题。</li>
+</ul>
+<pre><code class="language-bash">rm  /etc/yum.repos.d/*
+wget -O /etc/yum.repos.d/CentOS-Base.repo https://mirrors.aliyun.com/repo/Centos-7.repo
+yum install git ssh
+</code></pre>
+<h2 id="生成-grub-配置">👇 生成 GRUB 配置</h2>
+<ul>
+<li>重新生成配置，并更新内核参数。</li>
+</ul>
+<pre><code class="language-bash">grub2-mkconfig -o /boot/grub2/grub.cfg
+</code></pre>
+<h2 id="创建公钥私钥">👇 创建公钥私钥</h2>
+<ul>
+<li>文件位于 /root/.ssh/，其中 id_rsa 为私钥，id_rsa.pub 为公钥，接下来打开 id_rsa.pub，替换至原本的。修改私钥文件的权限，确保只有所有者可以读写，而其他用户没有权限。</li>
+</ul>
+<pre><code class="language-bash">ssh-keygen -t rsa
+chmod 600 /root/.ssh/id_rsa
+</code></pre>
+<h2 id="安装常用工具">👇 安装常用工具</h2>
+<ul>
+<li>安装一些常用的工具。</li>
+</ul>
+<pre><code class="language-bash">yum install net-tools
+yum install git
+yum install elfutils-libelf-devel
+yum install nfs-utils
+yum install xorriso
+yum install centos-release-scl
+yum install python3
+yum install python3-pip
+pip3 install requests
+yum install devtoolset-8-gcc
+yum install bash-completion
+</code></pre>
+<ul>
+<li>修改文件 ~/.bashrc，默认使用高版本 gcc，以及增加 git 命令联想，Tab 自动补全。</li>
+</ul>
+<pre><code class="language-bash">vi ~/.bashrc
+######文件修改内容如下######
+source scl_source enable devtoolset-8
+source /usr/share/doc/git-*/contrib/completion/git-completion.bash
+######文件修改内容结束######
+</code></pre>
+<h2 id="同步远程目录">👇 同步远程目录</h2>
+<ul>
+<li>通过 rsync 将远程文件夹同步到本地文件夹。</li>
+</ul>
+<pre><code class="language-bash">rsync -avzh root@192.168.139.100:/data/huangyj /data/
+</code></pre>
+<h2 id="设置文件夹权限">👇 设置文件夹权限</h2>
+<ul>
+<li>设置文件夹内只有 root 用户有读写权限，其他人是读权限。</li>
+</ul>
+<pre><code class="language-bash">sudo useradd newuser
+sudo passwd newuser
+sudo chown root:root /path/to/folder
+sudo chmod 755 /path/to/folder
+</code></pre>
+<h2 id="搭建-nfs-服务">👇 搭建 NFS 服务</h2>
+<ul>
+<li>安装 NFS 服务器软件包。</li>
+</ul>
+<pre><code class="language-bash">sudo yum install nfs-utils
+</code></pre>
+<ul>
+<li>配置 NFS 服务器。</li>
+</ul>
+<pre><code class="language-bash">sudo vi /etc/exports
+######文件修改内容如下######
+/data/huangyj/centos-7_2009 *(rw,sync,no_root_squash,no_subtree_check)
+/data/huangyj/centos-7_2009-hpc *(rw,sync,no_root_squash,no_subtree_check)
+/data/huangyj/centos-8 *(rw,sync,no_root_squash,no_subtree_check)
+/data/huangyj/centos-8-hpc *(rw,sync,no_root_squash,no_subtree_check)
+######文件修改内容结束######
+</code></pre>
+<ul>
+<li>启动并设置 NFS 服务器开机自启动。</li>
+</ul>
+<pre><code class="language-bash">sudo systemctl start nfs-server
+sudo systemctl enable nfs-server
+</code></pre>
+<ul>
+<li>如果系统使用防火墙，确保允许 NFS 服务通过防火墙。</li>
+</ul>
+<pre><code class="language-bash">sudo firewall-cmd --permanent --zone=public --add-service=nfs
+sudo firewall-cmd --reload
+</code></pre>
+<h2 id="搭建-ftp-服务">👇 搭建 FTP 服务</h2>
+<ul>
+<li>安装 FTP 服务器软件包。</li>
+</ul>
+<pre><code class="language-bash">sudo yum install vsftpd
+</code></pre>
+<ul>
+<li>配置 FTP 服务器。</li>
+</ul>
+<pre><code class="language-bash">sudo vi /etc/vsftpd/vsftpd.conf
+######文件修改内容如下######
+anon_root=/data/chfsfile/chfsfile
+anonymous_enable=YES
+allow_writeable_chroot=YES
+anon_other_write_enable=YES
+######文件修改内容结束######
+</code></pre>
+<ul>
+<li>启动并设置 FTP 服务器开机自启动。</li>
+</ul>
+<pre><code class="language-bash">sudo systemctl start vsftpd
+sudo systemctl enable vsftpd
+</code></pre>
+<ul>
+<li>如果系统使用防火墙，确保允许 FTP 服务通过防火墙。</li>
+</ul>
+<pre><code class="language-bash">sudo firewall-cmd --permanent --add-service=ftp
+sudo firewall-cmd --reload
+</code></pre>
+<h2 id="搭建-tftp-服务">👇 搭建 TFTP 服务</h2>
+<ul>
+<li>安装 TFTP 服务器软件包。</li>
+</ul>
+<pre><code class="language-bash">sudo yum install xinetd tftp-server
+</code></pre>
+<ul>
+<li>配置 TFTP 服务器。</li>
+</ul>
+<pre><code class="language-bash">sudo vi /etc/xinetd.d/tftp
+######文件修改内容如下######
+service tftp
+{
+        socket_type             = dgram
+        protocol                = udp
+        wait                    = yes
+        user                    = root
+        server                  = /usr/sbin/in.tftpd
+        server_args             = -s /data/chfsfile/chfsfile
+        disable                 = no
+        per_source              = 11
+        cps                     = 100 2
+        flags                   = IPv4
+}
+######文件修改内容结束######
+</code></pre>
+<ul>
+<li>启动并设置 TFTP 服务器开机自启动。</li>
+</ul>
+<pre><code class="language-bash">sudo systemctl start xinetd.service
+sudo systemctl enable xinetd.service
+</code></pre>
+<ul>
+<li>如果 systemctl 启动服务的时候报错 Error：no space left on device</li>
+</ul>
+<pre><code class="language-bash">sudo vi /etc/sysctl.conf
+######文件修改内容如下######
+fs.inotify.max_user_watches = 262144
+######文件修改内容结束######
+</code></pre>
+<ul>
+<li>使配置生效。</li>
+</ul>
+<pre><code class="language-bash">sysctl -p
+</code></pre>
+<ul>
+<li>如果系统使用防火墙，确保允许 TFTP 服务通过防火墙。</li>
+</ul>
+<pre><code class="language-bash">sudo firewall-cmd --permanent --add-service=tftp
+sudo firewall-cmd --reload
+</code></pre>
+<h2 id="安装宝塔面板">👇 安装宝塔面板</h2>
+<ul>
+<li>使用<a href="https://www.bt.cn/new/download.html">宝塔官网安装脚本</a>，SSH关闭宝塔安全入口。</li>
+</ul>
+<pre><code class="language-bash">rm -f /www/server/panel/data/admin_path.pl
+sudo systemctl enable bt
+</code></pre>
+<h2 id="内网穿透服务">👇 内网穿透服务</h2>
+<ul>
+<li>使用<a href="https://dashboard.cpolar.com/">cpolar</a>实现免费内网穿透。</li>
+</ul>
+<pre><code class="language-bash">cpolar authtoken NmJmMTgwMzYtOTE5ZS00YmE0LWE1MDctYjUxYTQ3MDkyZGY2
+# Authtoken saved to configuration file: /usr/local/etc/cpolar/cpolar.yml
+authtoken: NmJmMTgwMzYtOTE5ZS00YmE0LWE1MDctYjUxYTQ3MDkyZGY2
+tunnels:
+  site:
+    proto: http
+    addr: &quot;88&quot;
+    region: cn_vip_top
+  bt:
+    proto: tcp
+    addr: &quot;8888&quot;
+    region: cn_vip_top
+</code></pre>
+<h2 id="设置开机自启动">👇 设置开机自启动</h2>
+<ul>
+<li>可以通过修改 rc.local，添加一些私有化自启动服务。</li>
+</ul>
+<pre><code class="language-bash">sudo vi /etc/rc.local
+
+######文件修改内容如下######
+systemctl disable firewalld                                                 # 永久禁用防火墙服
+chfs-linux-amd64-3.1 --file=/data/chfsfile/chfs.ini &amp;     # 开启文件共享服务器
+######文件修改内容结束######
+</code></pre>
+<h2 id="安装-docker-容器">👇 安装 Docker 容器</h2>
+<ul>
+<li>删除 Docker 软件包。</li>
+</ul>
+<pre><code class="language-bash">sudo yum remove docker-ce docker-ce-cli containerd.io
+</code></pre>
+<ul>
+<li>安装 yum-utils 是为方便添加 yum 源使用的，device-mapper-persistent-data 和 lvm2 是储存设备映射 (devicemapper) 必须的两个软件包。</li>
+</ul>
+<pre><code class="language-bash">sudo yum install -y yum-utils lvm2 device-mapper-persistent-data
+</code></pre>
+<ul>
+<li>由于默认是国外的 yum 源，基本不可用，我们这边修改为阿里源或清华源。</li>
+</ul>
+<pre><code class="language-bash">sudo yum-config-manager --add-repo http://mirrors.aliyun.com/docker-ce/linux/centos/docker-ce.repo
+</code></pre>
+<ul>
+<li>更新下修改的软件源。</li>
+</ul>
+<pre><code class="language-bash">sudo yum makecache fast
+</code></pre>
+<ul>
+<li>默认版本是 ce 的稳定版本。</li>
+</ul>
+<pre><code class="language-bash">sudo yum -y install docker-ce
+</code></pre>
+<ul>
+<li>安装完成后执行如下命令检测安装是否成功。</li>
+</ul>
+<pre><code class="language-bash">docker version
+</code></pre>
+<ul>
+<li><a href="https://cr.console.aliyun.com/cn-hangzhou/instances/mirrors">阿里云镜像加速器</a>配置。</li>
+</ul>
+<pre><code class="language-bash">sudo mkdir -p /etc/docker
+sudo tee /etc/docker/daemon.json &lt;&lt;-'EOF'
+{
+  &quot;registry-mirrors&quot;: [&quot;https://e7glsap4.mirror.aliyuncs.com&quot;]
+}
+EOF
+sudo systemctl daemon-reload
+sudo systemctl restart docker
+</code></pre>
+<ul>
+<li>设置 Docker 自启动。</li>
+</ul>
+<pre><code class="language-bash">sudo systemctl start docker
+sudo systemctl enable docker
+</code></pre>
+<ul>
+<li>测试搜索并拉取更新镜像。</li>
+</ul>
+<pre><code class="language-bash">docker search hello-world
+docker pull hello-world
+</code></pre>
+<ul>
+<li>如果搜索并拉取更新镜像失败，可以查看服务器 DNS 网络配置。</li>
+</ul>
+<pre><code class="language-bash">vi /etc/resolv.conf
+######文件修改内容如下######
+nameserver 8.8.8.8
+nameserver 8.8.8.4
+nameserver 8.8.4.4
+######文件修改内容结束######
+</code></pre>
+<h2 id="安装-nascab-系统">👇 安装 Nascab 系统</h2>
+<ul>
+<li>Docker安装<a href="https://www.nascab.cn/docker.html">Nascab</a>系统，实现私有NAS！</li>
+</ul>
+<pre><code class="language-bash">docker search nascab
+docker pull ypptec/nascab
+docker run -v /data/nascab/myData:/myData -v /data/nascab/nascabData:/root/.local/share/nascab -p 8080:80 -p 8090:90 -p 8443:443 -p 8021:21 -d --name nascab --privileged=true --log-opt max-size=10m --log-opt max-file=3 ypptec/nascab
+</code></pre>
+<ul>
+<li>填坑：文件内权限不足会导致启动 Docker 失败。</li>
+</ul>
+<pre><code class="language-bash">docker exec -it nascab /bin/sh    # 进入docker内部
+docker images
+docker rmi cf6ea82ce974
+docker ps -a
+docker rm nascab
+docker logs nascab
+netstat -tuln
+</code></pre>
+<ul>
+<li>设置 Docker 某容器开机自启动。</li>
+</ul>
+<pre><code class="language-bash">docker update --restart=always 容器ID(或者容器名)
+</code></pre>
+<h2 id="thank-you-for-browsingenjoy~">😘 Thank you for browsing，Enjoy~</h2>
+]]></content>
+    </entry>
+</feed>
